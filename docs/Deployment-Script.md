@@ -86,9 +86,12 @@ During install the script asks for core settings and writes them into `.env`:
 | Server port | `SERVER_PORT` | `5174` |
 | Client port | `CLIENT_PORT` | `80` |
 | Media worker port | `WORKER_PORT` | `8080` |
+| HTTPS media port | `MEDIA_PORT` | `8443` |
 | Email for Let's Encrypt notices (certbot mode) | — | — |
 
 Encryption and push keys (`STORAGE_ENCRYPTION_KEY`, `VAPID_*`) are generated automatically. The full list of variables you can tune later lives in [Environment Variables](./Environment-Variables.md).
+
+The HTTPS media port serves application-hosted message files and thumbnails on a separate origin. Open that port in your firewall and set `APP_PUBLIC_URL` to the HTTPS app origin, or set `MEDIA_PUBLIC_URL` to an explicit HTTPS origin. S3-backed files continue using their storage URLs.
 
 ### 6. First-run owner creation
 

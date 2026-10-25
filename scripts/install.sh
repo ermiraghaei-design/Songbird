@@ -57,6 +57,7 @@ NGINX_SITE_FILE="/etc/nginx/sites-available/songbird"
 NGINX_ENABLED_FILE="/etc/nginx/sites-enabled/songbird"
 DEFAULT_SERVER_PORT="5174"
 DEFAULT_CLIENT_PORT="80"
+DEFAULT_MEDIA_PORT="8443"
 DEFAULT_WORKER_PORT="8080"
 DEFAULT_FILE_UPLOAD="true"
 DEFAULT_FILE_UPLOAD_MAX_SIZE_MB="25"
@@ -105,6 +106,7 @@ POSTGRES_URL=""
 POSTGRES_SSL="false"
 SERVER_PORT="$DEFAULT_SERVER_PORT"
 CLIENT_PORT="$DEFAULT_CLIENT_PORT"
+MEDIA_PORT="$DEFAULT_MEDIA_PORT"
 WORKER_PORT="$DEFAULT_WORKER_PORT"
 FILE_UPLOAD="$DEFAULT_FILE_UPLOAD"
 MAX_UPLOAD_MB="$DEFAULT_MAX_UPLOAD_MB"
@@ -800,6 +802,19 @@ prompt_worker_port() {
       return 0
     fi
     printf "Port must be an integer between 1 and 65535.\n"
+  done
+}
+
+prompt_media_port() {
+  local default_port="${1:-$DEFAULT_MEDIA_PORT}"
+  local value=""
+  while true; do
+    prompt_read "Enter HTTPS media port (default: $default_port): " value
+    if [[ -z "$value" ]]; then printf "%s" "$default_port"; return 0; fi
+    if [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1 && value <= 65535 )) && [[ "$value" != "$CLIENT_PORT" && "$value" != "$SERVER_PORT" ]]; then
+      printf "%s" "$value"; return 0
+    fi
+    printf "Media port must be 1-65535 and differ from the server and client ports.\n"
   done
 }
 
@@ -2193,6 +2208,7 @@ write_env_fallback() {
 # Server Configuration
 SERVER_PORT=${SERVER_PORT}
 CLIENT_PORT=${CLIENT_PORT}
+MEDIA_PORT=${MEDIA_PORT}
 
 # Application Settings
 APP_ENV=production
@@ -2335,6 +2351,7 @@ sync_values_from_env() {
   local env_file="$INSTALL_DIR/.env"
   SERVER_PORT="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   CLIENT_PORT="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
+  MEDIA_PORT="$(get_existing_env_value "MEDIA_PORT" "$DEFAULT_MEDIA_PORT")"
   FILE_UPLOAD="$(get_existing_env_value "FILE_UPLOAD" "$DEFAULT_FILE_UPLOAD")"
   MAX_UPLOAD_MB="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
   RETENTION_DAYS="$(get_existing_env_value "MESSAGE_FILE_RETENTION" "$DEFAULT_RETENTION_DAYS")"
@@ -2637,6 +2654,7 @@ collect_install_options() {
     CLIENT_PORT="$(prompt_client_port "443")"
   fi
   WORKER_PORT="$(prompt_worker_port "$DEFAULT_WORKER_PORT")"
+  if [[ "$CERT_MODE" != "http" ]]; then MEDIA_PORT="$(prompt_media_port "$DEFAULT_MEDIA_PORT")"; fi
   if [[ "$CERT_MODE" != "http" ]]; then
     log "Using HTTP redirect on port 80 and HTTPS on port ${CLIENT_PORT}."
   fi
@@ -2857,7 +2875,23 @@ EOF
 )
       fi
 
+      if [[ "$mode" == "ssl" ]]; then
       config_body+=$(cat <<EOF
+server {
+  listen ${MEDIA_PORT} ssl;
+  server_name ${domain_group_names};
+  client_max_body_size ${MAX_UPLOAD_MB}m;
+${ssl_block}
+  location /api/uploads/ {
+    proxy_pass http://127.0.0.1:${SERVER_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+}
+
 server {
   ${current_listen_line}
   server_name ${domain_group_names};
@@ -2893,9 +2927,27 @@ ${ssl_block}
 
 EOF
 )
+      fi
     done
   else
+    if [[ "$mode" == "ssl" ]]; then
     config_body=$(cat <<EOF
+server {
+  listen ${MEDIA_PORT} ssl;
+  server_name ${NGINX_SERVER_NAME};
+  client_max_body_size ${MAX_UPLOAD_MB}m;
+${ssl_block}
+${acme_block}
+  location /api/uploads/ {
+    proxy_pass http://127.0.0.1:${SERVER_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+}
+
 server {
   ${listen_line}
   server_name ${NGINX_SERVER_NAME};
@@ -2931,6 +2983,9 @@ ${acme_block}
 }
 EOF
 )
+    else
+      config_body=""
+    fi
   fi
 
   run_silent run_as_root tee "$NGINX_SITE_FILE" >/dev/null <<EOF
@@ -3387,6 +3442,11 @@ update_nginx_runtime_values() {
   local existing_key=""
   existing_cert="$(run_as_root_output grep -E '^\s*ssl_certificate ' "$NGINX_SITE_FILE" | head -n 1 | sed -E 's/^\s*ssl_certificate\s+([^;]+);/\1/' | tr -d '\r\n')" || existing_cert=""
   existing_key="$(run_as_root_output grep -E '^\s*ssl_certificate_key ' "$NGINX_SITE_FILE" | head -n 1 | sed -E 's/^\s*ssl_certificate_key\s+([^;]+);/\1/' | tr -d '\r\n')" || existing_key=""
+  if [[ -n "$existing_cert" && -n "$existing_key" ]]; then
+    local listen_line=""
+    listen_line="$(run_as_root_output grep -E '^\s*listen ' "$NGINX_SITE_FILE" | grep -v '80;' | grep -v "${MEDIA_PORT}" | head -n 1 | tr -d '\r\n')" || listen_line=""
+    if [[ "$listen_line" =~ ([0-9]+)[[:space:]]+ssl ]]; then CLIENT_PORT="${BASH_REMATCH[1]}"; fi
+  fi
 
   if [[ -n "$existing_cert" && -n "$existing_key" ]]; then
     write_nginx_site_config "ssl" "$existing_cert" "$existing_key"
@@ -3396,7 +3456,7 @@ update_nginx_runtime_values() {
 
   if run_as_root nginx -t; then
     run_as_root systemctl reload nginx
-    log "Nginx updated with SERVER_PORT=${SERVER_PORT}, CLIENT_PORT=${CLIENT_PORT}, MAX_UPLOAD_MB=${MAX_UPLOAD_MB}."
+    log "Nginx updated with SERVER_PORT=${SERVER_PORT}, CLIENT_PORT=${CLIENT_PORT}, MEDIA_PORT=${MEDIA_PORT}, MAX_UPLOAD_MB=${MAX_UPLOAD_MB}."
     log "Backup saved at ${backup_file}."
     return 0
   fi
@@ -3419,11 +3479,11 @@ rebuild_and_restart_after_settings_change() {
     run_as_root systemctl restart songbird-worker.service || true
   fi
 
-  if [[ "$needs_nginx" == "yes" ]]; then
-    log "Updating Nginx config for SERVER_PORT/CLIENT_PORT/MAX_UPLOAD_MB changes..."
+  if [[ "$needs_nginx" == "yes" || "$CLIENT_PORT" != "$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")" || "$MEDIA_PORT" != "$(get_existing_env_value "MEDIA_PORT" "$DEFAULT_MEDIA_PORT")" ]]; then
+    log "Updating Nginx config for SERVER_PORT/CLIENT_PORT/MEDIA_PORT/MAX_UPLOAD_MB changes..."
     update_nginx_runtime_values || return 1
   else
-    log "Nginx update not required (SERVER_PORT/CLIENT_PORT/MAX_UPLOAD_MB unchanged)."
+    log "Nginx update not required (SERVER_PORT/CLIENT_PORT/MEDIA_PORT/MAX_UPLOAD_MB unchanged)."
   fi
 }
 
@@ -3691,9 +3751,10 @@ edit_settings() {
     replace_env_value "$env_file" "CLIENT_PORT" "$DEFAULT_CLIENT_PORT"
   fi
 
-  local before_server before_client before_max
+  local before_server before_client before_media before_max
   before_server="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   before_client="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
+  before_media="$(get_existing_env_value "MEDIA_PORT" "$DEFAULT_MEDIA_PORT")"
   before_max="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
 
   local before after
@@ -3708,13 +3769,14 @@ edit_settings() {
     return 0
   fi
 
-  local after_server after_client after_max
+  local after_server after_client after_media after_max
   after_server="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   after_client="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
+  after_media="$(get_existing_env_value "MEDIA_PORT" "$DEFAULT_MEDIA_PORT")"
   after_max="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
 
   local needs_nginx="no"
-  if [[ "$before_server" != "$after_server" || "$before_client" != "$after_client" || "$before_max" != "$after_max" ]]; then
+  if [[ "$before_server" != "$after_server" || "$before_client" != "$after_client" || "$before_media" != "$after_media" || "$before_max" != "$after_max" ]]; then
     needs_nginx="yes"
   fi
 

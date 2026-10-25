@@ -6,6 +6,7 @@ import { resolveWebhookCallbackUrl } from "../lib/webhookUrl.js";
 import { markEncryptedFileRecord } from "../lib/storageEncryption.js";
 import { resolveThumbUrl } from "../lib/thumbUrl.js";
 import { readEnvBool } from "../settings/env.js";
+import { toMediaUrl } from "../lib/mediaOrigin.js";
 
 function registerMessageRoutes(app, deps) {
   const {
@@ -69,6 +70,7 @@ function registerMessageRoutes(app, deps) {
     markMessagesRead,
     markMessageRead,
   } = deps;
+  const mediaOrigin = deps.mediaOrigin || "";
 
   const safeBasename = (p) => {
     if (path && typeof path.basename === "function") return path.basename(p);
@@ -365,7 +367,7 @@ function registerMessageRoutes(app, deps) {
       const messageId = file.message_id;
       if (!filesByMessageId[messageId]) filesByMessageId[messageId] = [];
 
-      let fileUrl = `/api/uploads/messages/${file.stored_name}`;
+      let fileUrl = toMediaUrl(`/api/uploads/messages/${file.stored_name}`, mediaOrigin);
       let thumbUrl = null;
       const driver = file.storage_driver;
       const storageKey = file.storage_key;
@@ -376,6 +378,7 @@ function registerMessageRoutes(app, deps) {
         thumbKey,
         fileId: file.id,
       });
+      thumbUrl = toMediaUrl(thumbUrl, mediaOrigin);
       if (
         (driver === "remote" || driver === "s3") &&
         deps.storageProvider &&
@@ -1500,15 +1503,15 @@ function registerMessageRoutes(app, deps) {
               return await deps.storageProvider.getDownloadUrl(storageKey);
             } catch (_) {}
           }
-          return storedName ? `/api/uploads/messages/${storedName}` : null;
+          return storedName ? toMediaUrl(`/api/uploads/messages/${storedName}`, mediaOrigin) : null;
         };
 
         const resolveFileThumbUrl = async (file) =>
-          resolveThumbUrl({
+          toMediaUrl(await resolveThumbUrl({
             storageProvider: deps.storageProvider,
             file,
             fileId: file?.id,
-          });
+          }), mediaOrigin);
 
         const responseFiles = await Promise.all(
           sourceFilesForResponse.map(async (file, idx) => {

@@ -7,6 +7,7 @@ import { dispatchMediaWorkerJob } from "../lib/mediaWorker.js";
 import { ensureBucketCorsForRequest } from "../lib/bucketCors.js";
 import { resolveWebhookCallbackUrl } from "../lib/webhookUrl.js";
 import { resolveThumbUrl } from "../lib/thumbUrl.js";
+import { toMediaUrl } from "../lib/mediaOrigin.js";
 import { readEnvBool } from "../settings/env.js";
 
 export function registerRemoteUploadRoutes(app, deps) {
@@ -686,13 +687,14 @@ export function registerRemoteUploadRoutes(app, deps) {
               ? thumbStorageKey
               : (f.thumb_storage_key || f.thumbStorageKey);
             const storedName = f.stored_name || f.storedName || "";
-            let fileUrl = storedName ? `/api/uploads/messages/${storedName}` : null;
+            let fileUrl = storedName ? toMediaUrl(`/api/uploads/messages/${storedName}`, deps.mediaOrigin) : null;
             let thumbUrl = await resolveThumbUrl({
               storageProvider,
               file: f,
               thumbKey,
               fileId: f?.id ?? fileId,
             });
+            thumbUrl = toMediaUrl(thumbUrl, deps.mediaOrigin);
             if (
               (driver === "remote" || driver === "s3") &&
               storageProvider &&

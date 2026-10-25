@@ -20,6 +20,8 @@ nano .env
 |---|---|---:|---|
 | `SERVER_PORT` | `integer` | `5174` | API server port. (`PORT` is supported as a legacy fallback.) |
 | `CLIENT_PORT` | `integer` | `80` | Nginx listen port (what users connect to). |
+| `MEDIA_PORT` | `integer` | `8443` | Separate HTTPS port for application-hosted message media and thumbnails. |
+| `MEDIA_PUBLIC_URL` | `URL` | `""` | Optional explicit HTTPS origin for message media. When empty, `APP_PUBLIC_URL` plus `MEDIA_PORT` is used. |
 | `BIND_ADDRESS` | `string` | `localhost` | Network interface to bind to. Use `localhost` for VPS/private networks to avoid exposing backend when firewall is disabled; use `0.0.0.0` for Docker containers. |
 | `DATA_DIR` | `string` | `<project_root>/data` | Absolute path to the data directory (database, uploads, backups). Override this on cloud platforms (Railway, Render, Fly.io) to point at the platform's persistent volume mount. |
 | `DB_CLIENT` | `string` | `sqlite3` | Database driver client (`sqlite3` or `postgres`). |

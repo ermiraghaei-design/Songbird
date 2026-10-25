@@ -12,6 +12,7 @@ import rateLimit from "express-rate-limit";
 import multer from "multer";
 import webpush from "web-push";
 import { registerApiRoutes } from "./api/index.js";
+import { getMediaOrigin } from "./lib/mediaOrigin.js";
 import { ensureValidVapidKeys } from "./lib/vapid.js";
 import { createSseHub } from "./lib/sse.js";
 import { createWebSocketGateway } from "./lib/websocketGateway.js";
@@ -817,6 +818,7 @@ async function backfillStorageEncryption() {
 registerUploadRoutes(app, { adminGetRow, storageProvider });
 
 const apiDeps = {
+  mediaOrigin: getMediaOrigin(),
   dbConfig: readDbConfig(),
   postgresMaintenance: null,
   storageProvider,

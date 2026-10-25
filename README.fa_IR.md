@@ -46,6 +46,10 @@ songbird-deploy
 > [!TIP]
 > داشتن یک دامنه که به IP عمومی سرور شما اشاره کند پیشنهاد می‌شود، و برای push notification به HTTPS نیاز دارید (به‌جز روی `localhost`).
 
+### پورت جداگانه برای رسانه
+
+در حالت self-hosted می‌توانید فایل‌های پیام و thumbnailهای سرو‌شده توسط برنامه را روی یک پورت HTTPS جدا ارائه کنید. مقدار `MEDIA_PORT` به طور پیش‌فرض `8443` است؛ این پورت باید در فایروال و reverse proxy باز باشد. برای اعلام origin عمومی رسانه به برنامه، `APP_PUBLIC_URL=https://chat.example.com` را تنظیم کنید؛ برنامه لینک رسانه را به `https://chat.example.com:8443` تبدیل می‌کند. در صورت داشتن hostname یا تنظیم CDN جدا، می‌توانید `MEDIA_PUBLIC_URL` را مستقیماً تنظیم کنید. فایل‌های ذخیره‌شده در S3 همچنان از URL فضای ذخیره‌سازی استفاده می‌کنند.
+
 ## مستندات
 
 مستندات کامل در [docs.songbird.website](https://docs.songbird.website/fa/) قرار دارد:
